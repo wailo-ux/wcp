@@ -1,0 +1,66 @@
+function doPost(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getActiveSheet();
+  
+  // --- KONFIGURASI ---
+  var folderId = "1HaCk_3x3TVpsvH7aBtJ4On2PGPiW9U-u"; 
+  var accountSid = "AC74e697d40094e5b9006b4c605006777d";
+  var authToken = "9409755310eca489af8b7a458fe3dc6d";
+  var rentangMenit = 5; 
+  // ----------------------------------
+
+  // Setup Header jika kosong
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["TIME STAMP", "SENDER", "KATEGORI", "TEKS", "VISUAL FOTO"]);
+    sheet.getRange("A1:E1").setFontWeight("bold").setBackground("#d9ead3");
+  }
+  
+  var dari = e.parameter.From || "Anonim";
+  var isiPesan = e.parameter.Body || "";
+  var urlTwilio = e.parameter.MediaUrl0;
+  var waktuSekarang = new Date();
+
+  // 1. Identifikasi Kategori
+  var kategori = "";
+  var teksBersih = "";
+
+  if (isiPesan.toLowerCase().startsWith("#laporana")) {
+    kategori = "LAPORAN A";
+    teksBersih = isiPesan.replace(/#laporana/i, "").trim();
+  } else if (isiPesan.toLowerCase().startsWith("#laporanb")) {
+    kategori = "LAPORAN B";
+    teksBersih = isiPesan.replace(/#laporanb/i, "").trim();
+  }
+
+  // 2. Logika: Jika ada gambar, proses masuk ke baris baru
+  if (urlTwilio) {
+    try {
+      var authHeader = "Basic " + Utilities.base64Encode(accountSid + ":" + authToken);
+      var options = { "headers": { "Authorization": authHeader } };
+      var respon = UrlFetchApp.fetch(urlTwilio, options);
+      
+      var folder = DriveApp.getFolderById(folderId);
+      var simpanFile = folder.createFile(respon.getBlob());
+      
+      // PENTING: Ubah izin file agar bisa dilihat oleh fungsi =IMAGE
+      simpanFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      
+      var fileId = simpanFile.getId();
+      var directLink = "https://drive.google.com/uc?export=view&id=" + fileId;
+      var rumusImage = '=IMAGE("' + directLink + '")';
+
+      // Jika gambar dikirim tanpa teks (lanjutan), ambil kategori dari baris terakhir
+      if (kategori === "" && sheet.getLastRow() > 1) {
+        kategori = sheet.getRange(sheet.getLastRow(), 3).getValue();
+      }
+
+      // Masukkan ke baris baru
+      sheet.appendRow([waktuSekarang, dari, kategori, teksBersih, rumusImage]);
+      
+    } catch (err) {
+      sheet.appendRow([waktuSekarang, dari, kategori, teksBersih, "Gagal muat gambar"]);
+    }
+  }
+
+  return ContentService.createTextOutput("<Response></Response>").setMimeType(ContentService.MimeType.XML);
+}
