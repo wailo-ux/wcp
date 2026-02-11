@@ -1,0 +1,70 @@
+var token = "8075574862:AAGz41b0GS-mtwXr_O4ENXqS8WLp9TOru34";
+var folderId = "1A8qaG8JfY69_j10IXsYbQn9St-GCWahD";
+
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = JSON.parse(e.postData.contents);
+  
+  var message = data.message;
+  var sender = message.from.first_name || message.from.id;
+  var text = message.caption || message.text || "";
+  var waktu = new Date();
+
+  // 1. Identifikasi Kategori
+  var kategori = "";
+  var teksBersih = "";
+  if (text.toLowerCase().startsWith("#tawas")) {
+    kategori = "TAWAS";
+    teksBersih = text.replace(/#tawas/i, "").trim();
+  } else if (text.toLowerCase().startsWith("#tss")) {
+    kategori = "TSS";
+    teksBersih = text.replace(/#tss/i, "").trim();
+  }
+
+  // 2. Jika ada Foto
+  if (message.photo) {
+    // Telegram mengirim beberapa ukuran, ambil yang terakhir (terbesar)
+    var photoId = message.photo[message.photo.length - 1].file_id;
+    
+    // Ambil Link File dari Telegram Server
+    var fileUrl = getTelegramFileUrl(photoId);
+    
+    // Simpan ke Drive
+    var response = UrlFetchApp.fetch(fileUrl);
+    var folder = DriveApp.getFolderById(folderId);
+    var file = folder.createFile(response.getBlob());
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    
+    var directLink = "https://drive.google.com/uc?export=view&id=" + file.getId();
+    var rumusImage = '=IMAGE("' + directLink + '")';
+
+    // Cek kategori lanjutan jika teks kosong
+    if (kategori === "" && sheet.getLastRow() > 1) {
+      kategori = sheet.getRange(sheet.getLastRow(), 3).getValue();
+    }
+
+    // Tulis ke Sheet
+    sheet.appendRow([waktu, sender, kategori, teksBersih, rumusImage]);
+    
+    // Atur Ukuran 300x300
+    var lastRow = sheet.getLastRow();
+    sheet.setColumnWidth(5, 300);
+    sheet.setRowHeight(lastRow, 300);
+    sheet.getRange(lastRow, 1, 1, 5).setBorder(true, true, true, true, true, true)
+          .setVerticalAlignment("middle").setHorizontalAlignment("center");
+  }
+}
+
+// Fungsi pembantu untuk mendapatkan URL file Telegram
+function getTelegramFileUrl(fileId) {
+  var response = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/getFile?file_id=" + fileId);
+  var filePath = JSON.parse(response.getContentText()).result.file_path;
+  return "https://api.telegram.org/file/bot" + token + "/" + filePath;
+}
+
+// Fungsi untuk menghubungkan Script ke Telegram (Jalankan sekali saja)
+function setWebhook() {
+  var webAppUrl = "URL_WEB_APP_ANDA_SETELAH_DEPLOY";
+  var response = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/setWebhook?url=" + webAppUrl);
+  Logger.log(response.getContentText());
+}
