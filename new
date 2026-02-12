@@ -11,31 +11,38 @@ function doPost(e) {
   var sender = message.from.first_name || message.from.id;
   var text = (message.caption || message.text || "").trim();
   var waktu = new Date();
+  var rentangMenit = 60; // Toleransi 1 jam untuk satu sesi laporan
 
-  // 1. LOGIKA PARSING BARU MENGGUNAKAN TITIK DUA (:)
+  // 1. Inisialisasi Header jika Sheet kosong
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["TIME STAMP", "SENDER", "LOKASI", "TSS (NOMINAL)", "TAWAS (KARUNG)", "FOTO TSS 1", "FOTO TSS 2", "FOTO TAWAS 1", "FOTO TAWAS 2"]);
+    sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#d9ead3").setHorizontalAlignment("center");
+  }
+
+  // 2. Logika Parsing Baru Menggunakan Titik Dua (:)
   var cmd = "";
   var lokasi = "";
   var nilai = "";
 
   if (text.toLowerCase().startsWith("/tss")) {
     cmd = "/tss";
-    var content = text.substring(4).trim(); // Menghilangkan "/tss"
-    var splitContent = content.split(":"); // Membagi berdasarkan ":"
+    var content = text.substring(4).trim(); 
+    var splitContent = content.split(":"); 
     lokasi = splitContent[0] ? splitContent[0].toUpperCase().trim() : "";
     nilai = splitContent[1] ? splitContent[1].trim() : "";
   } else if (text.toLowerCase().startsWith("/tawas")) {
     cmd = "/tawas";
-    var content = text.substring(6).trim(); // Menghilangkan "/tawas"
+    var content = text.substring(6).trim(); 
     var splitContent = content.split(":");
     lokasi = splitContent[0] ? splitContent[0].toUpperCase().trim() : "";
     nilai = splitContent[1] ? splitContent[1].trim() : "";
   }
 
-  // Izinkan foto lanjutan tanpa teks (untuk album)
+  // Izinkan foto album tanpa teks untuk masuk ke baris sebelumnya
   var isFotoLanjutan = (message.photo && text === "");
   if (!isFotoLanjutan && lokasi === "" && cmd === "") return;
 
-  // 2. Olah Foto
+  // 3. Olah Foto ke Google Drive
   var rumusImg = "";
   if (message.photo) {
     var photoId = message.photo[message.photo.length - 1].file_id;
@@ -46,26 +53,26 @@ function doPost(e) {
     rumusImg = '=IMAGE("https://drive.google.com/uc?export=view&id=' + file.getId() + '")';
   }
 
-  // 3. Pencarian Baris (Berdasarkan Lokasi Spesifik)
+  // 4. Pencarian Baris Terakhir (Berdasarkan Lokasi & Waktu)
   var lastRow = sheet.getLastRow();
   var targetRow = -1;
   
   if (lastRow > 1) {
-    var dataRows = sheet.getRange(Math.max(2, lastRow - 50), 1, Math.min(lastRow - 1, 50), 3).getValues();
-    for (var i = dataRows.length - 1; i >= 0; i--) {
-      var rowWaktu = new Date(dataRows[i][0]);
-      var rowLokasi = dataRows[i][2].toString().toUpperCase().trim();
+    var rangeData = sheet.getRange(Math.max(2, lastRow - 50), 1, Math.min(lastRow - 1, 50), 3).getValues();
+    for (var i = rangeData.length - 1; i >= 0; i--) {
+      var rowWaktu = new Date(rangeData[i][0]);
+      var rowLokasi = rangeData[i][2].toString().toUpperCase().trim();
       var selisihMenit = (waktu - rowWaktu) / 1000 / 60;
 
-      // Jika Lokasi Sesuai Persis (meskipun banyak kata)
-      if ((lokasi !== "" && rowLokasi === lokasi && selisihMenit < 120) || (isFotoLanjutan && selisihMenit < 5)) {
+      // Jika Lokasi Sesuai Persis atau Foto Tanpa Teks dalam waktu singkat
+      if ((lokasi !== "" && rowLokasi === lokasi && selisihMenit < rentangMenit) || (isFotoLanjutan && selisihMenit < 5)) {
         targetRow = (Math.max(2, lastRow - 50)) + i;
         break;
       }
     }
   }
 
-  // 4. Update atau Buat Baru
+  // 5. Eksekusi Update atau Buat Baris Baru
   if (targetRow !== -1) {
     if (isFotoLanjutan) {
       isiKolomFotoOtomatis(sheet, targetRow, rumusImg);
@@ -79,16 +86,17 @@ function doPost(e) {
       }
     }
   } else if (!isFotoLanjutan) {
+    // Buat Baris Baru jika lokasi belum ada dalam sesi ini
     var rowData = [waktu, sender, lokasi, (cmd==="/tss"?nilai:"-"), (cmd==="/tawas"?nilai:"-"), (cmd==="/tss"?rumusImg:""), "", (cmd==="/tawas"?rumusImg:""), ""];
     sheet.appendRow(rowData);
     formatBaris(sheet.getLastRow(), sheet);
   }
 }
 
-// Fungsi helper tetap sama seperti sebelumnya
+// FUNGSI HELPER
 function isiFotoEksklusif(sheet, row, c1, c2, img) {
   if (!img) return;
-  if (sheet.getRange(row, c1).getValue() === "") {
+  if (sheet.getRange(row, c1).getValue() === "" || sheet.getRange(row, c1).getValue() === "-") {
     sheet.getRange(row, c1).setFormula(img);
   } else {
     sheet.getRange(row, c2).setFormula(img);
@@ -98,7 +106,8 @@ function isiFotoEksklusif(sheet, row, c1, c2, img) {
 function isiKolomFotoOtomatis(sheet, row, img) {
   if (!img) return;
   for (var col = 6; col <= 9; col++) {
-    if (sheet.getRange(row, col).getValue() === "" || sheet.getRange(row, col).getValue() === "-") {
+    var val = sheet.getRange(row, col).getValue();
+    if (val === "" || val === "-") {
       sheet.getRange(row, col).setFormula(img);
       break;
     }
@@ -119,7 +128,7 @@ function getTelegramFileUrl(fileId) {
 }
 
 function setWebhook() {
-  var webAppUrl = "URL_WEB_APP_ANDA"; 
+  var webAppUrl = "URL_WEB_APP_ANDA_DISINI"; 
   var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/setWebhook?url=" + webAppUrl);
   Logger.log(res.getContentText());
 }
