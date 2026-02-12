@@ -1,0 +1,139 @@
+var token = "ISI_TOKEN_TELEGRAM_ANDA";
+var folderId = "ID_FOLDER_DRIVE_ANDA";
+
+function doPost(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getActiveSheet();
+  var data = JSON.parse(e.postData.contents);
+  if (!data || !data.message) return;
+
+  var message = data.message;
+  var chatId = message.chat.id;
+  var sender = message.from.first_name || message.from.id;
+  var text = (message.caption || message.text || "").trim();
+  var waktu = new Date();
+
+  // 1. AUTO HEADER & FREEZE HEADER (HEADER MATI SAAT SCROLL)
+  if (sheet.getLastRow() === 0) {
+    var headers = ["TIME STAMP", "SENDER", "LOKASI", "TSS (NOMINAL)", "TAWAS (KARUNG)", "FOTO TSS 1", "FOTO TSS 2", "FOTO TAWAS 1", "FOTO TAWAS 2"];
+    sheet.appendRow(headers);
+    
+    // Desain Header agar Ganteng
+    var headerRange = sheet.getRange("A1:I1");
+    headerRange.setFontWeight("bold")
+               .setBackground("#2c3e50") // Biru Gelap Profesional
+               .setFontColor("#ffffff") // Teks Putih
+               .setHorizontalAlignment("center")
+               .setVerticalAlignment("middle");
+               
+    sheet.setFrozenRows(1); // MENGUNCI HEADER AGAR DIAM SAAT SCROLL
+    
+    // Atur Lebar Kolom
+    sheet.setColumnWidths(1, 3, 150);
+    sheet.setColumnWidths(4, 2, 120);
+    sheet.setColumnWidths(6, 4, 250);
+  }
+
+  // 2. Parsing Command & Lokasi
+  var cmd = ""; var lokasi = ""; var nilai = "";
+  if (text.toLowerCase().startsWith("/tss")) {
+    cmd = "/tss";
+    var content = text.substring(4).trim();
+    var splitContent = content.split(":");
+    lokasi = splitContent[0] ? splitContent[0].toUpperCase().replace(/\s+/g, ' ').trim() : "";
+    nilai = splitContent[1] ? splitContent[1].trim() : "";
+  } else if (text.toLowerCase().startsWith("/tawas")) {
+    cmd = "/tawas";
+    var content = text.substring(6).trim();
+    var splitContent = content.split(":");
+    lokasi = splitContent[0] ? splitContent[0].toUpperCase().replace(/\s+/g, ' ').trim() : "";
+    nilai = splitContent[1] ? splitContent[1].trim() : "";
+  }
+
+  var isFotoLanjutan = (message.photo && text === "");
+  if (!isFotoLanjutan && lokasi === "" && cmd === "") return;
+
+  // 3. Simpan Foto ke Drive
+  var rumusImg = "";
+  if (message.photo) {
+    var photoId = message.photo[message.photo.length - 1].file_id;
+    var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/getFile?file_id=" + photoId);
+    var path = JSON.parse(res.getContentText()).result.file_path;
+    var blob = UrlFetchApp.fetch("https://api.telegram.org/file/bot" + token + "/" + path).getBlob();
+    var file = DriveApp.getFolderById(folderId).createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    rumusImg = '=IMAGE("https://drive.google.com/uc?export=view&id=' + file.getId() + '")';
+  }
+
+  // 4. LOGIKA PENCARIAN BARIS TERAKHIR
+  var lastRow = sheet.getLastRow();
+  var targetRow = -1;
+  if (lastRow > 1) {
+    var startRow = Math.max(2, lastRow - 100);
+    var dataRows = sheet.getRange(startRow, 1, (lastRow - startRow + 1), 3).getValues();
+    for (var i = dataRows.length - 1; i >= 0; i--) {
+      var rowLokasi = dataRows[i][2].toString().toUpperCase().replace(/\s+/g, ' ').trim();
+      var selisihMenit = (waktu - new Date(dataRows[i][0])) / 1000 / 60;
+      if ((lokasi !== "" && rowLokasi === lokasi && selisihMenit < 720) || (isFotoLanjutan && selisihMenit < 10)) {
+        targetRow = startRow + i;
+        break;
+      }
+    }
+  }
+
+  // 5. EKSEKUSI UPDATE ATAU BARU
+  if (targetRow !== -1) {
+    if (isFotoLanjutan) {
+      isiKolomFotoOtomatis(sheet, targetRow, rumusImg);
+      sendTelegramMessage(chatId, "📸 Foto tambahan masuk ke " + sheet.getRange(targetRow, 3).getValue());
+    } else {
+      if (cmd === "/tss") {
+        sheet.getRange(targetRow, 4).setValue(nilai);
+        isiFotoEksklusif(sheet, targetRow, 6, 7, rumusImg);
+        var alert = (parseInt(nilai) > 200) ? "\n🚨 *ALERT: TSS OVER 200!*" : "";
+        sendTelegramMessage(chatId, "✅ TSS " + lokasi + " Updated!" + alert);
+      } else if (cmd === "/tawas") {
+        sheet.getRange(targetRow, 5).setValue(nilai);
+        isiFotoEksklusif(sheet, targetRow, 8, 9, rumusImg);
+        sendTelegramMessage(chatId, "✅ TAWAS " + lokasi + " Updated!");
+      }
+    }
+  } else if (!isFotoLanjutan) {
+    var rowData = [waktu, sender, lokasi, (cmd==="/tss"?nilai:"-"), (cmd==="/tawas"?nilai:"-"), (cmd==="/tss"?rumusImg:""), "", (cmd==="/tawas"?rumusImg:""), ""];
+    sheet.appendRow(rowData);
+    formatBaris(sheet.getLastRow(), sheet);
+    sendTelegramMessage(chatId, "🆕 Baris baru dibuat: " + lokasi);
+  }
+}
+
+// FUNGSI PENDUKUNG
+function sendTelegramMessage(chatId, text) {
+  UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
+    "method":"post","contentType":"application/json","payload":JSON.stringify({"chat_id":chatId, "text":text, "parse_mode":"Markdown"})
+  });
+}
+
+function isiFotoEksklusif(sheet, row, c1, c2, img) {
+  if (!img) return;
+  var v1 = sheet.getRange(row, c1).getValue().toString();
+  if (v1 === "" || v1 === "-" || v1.length < 5) { sheet.getRange(row, c1).setFormula(img); } 
+  else { sheet.getRange(row, c2).setFormula(img); }
+}
+
+function isiKolomFotoOtomatis(sheet, row, img) {
+  if (!img) return;
+  for (var col = 6; col <= 9; col++) {
+    var val = sheet.getRange(row, col).getValue().toString();
+    if (val === "" || val === "-" || val.length < 5) { sheet.getRange(row, col).setFormula(img); break; }
+  }
+}
+
+function formatBaris(row, sheet) {
+  sheet.setRowHeight(row, 250);
+  sheet.getRange(row, 1, 1, 9).setBorder(true, true, true, true, true, true).setVerticalAlignment("middle").setHorizontalAlignment("center");
+}
+
+function setWebhook() {
+  var webAppUrl = "URL_WEB_APP_ANDA";
+  UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/setWebhook?url=" + webAppUrl);
+}
