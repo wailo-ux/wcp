@@ -11,21 +11,31 @@ function doPost(e) {
   var sender = message.from.first_name || message.from.id;
   var text = (message.caption || message.text || "").trim();
   var waktu = new Date();
-  var rentangMenit = 60; 
 
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["TIME STAMP", "SENDER", "LOKASI", "TSS (NOMINAL)", "TAWAS (KARUNG)", "FOTO TSS 1", "FOTO TSS 2", "FOTO TAWAS 1", "FOTO TAWAS 2"]);
-    sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#d9ead3").setHorizontalAlignment("center");
+  // 1. LOGIKA PARSING BARU MENGGUNAKAN TITIK DUA (:)
+  var cmd = "";
+  var lokasi = "";
+  var nilai = "";
+
+  if (text.toLowerCase().startsWith("/tss")) {
+    cmd = "/tss";
+    var content = text.substring(4).trim(); // Menghilangkan "/tss"
+    var splitContent = content.split(":"); // Membagi berdasarkan ":"
+    lokasi = splitContent[0] ? splitContent[0].toUpperCase().trim() : "";
+    nilai = splitContent[1] ? splitContent[1].trim() : "";
+  } else if (text.toLowerCase().startsWith("/tawas")) {
+    cmd = "/tawas";
+    var content = text.substring(6).trim(); // Menghilangkan "/tawas"
+    var splitContent = content.split(":");
+    lokasi = splitContent[0] ? splitContent[0].toUpperCase().trim() : "";
+    nilai = splitContent[1] ? splitContent[1].trim() : "";
   }
 
-  var parts = text.split(/\s+/); 
-  var command = parts[0] ? parts[0].toLowerCase() : "";
-  var lokasiInput = parts[1] ? parts[1].toUpperCase().trim() : "";
-  var nilaiInput = parts[2] || ""; 
-
+  // Izinkan foto lanjutan tanpa teks (untuk album)
   var isFotoLanjutan = (message.photo && text === "");
-  if (!isFotoLanjutan && lokasiInput === "") return;
+  if (!isFotoLanjutan && lokasi === "" && cmd === "") return;
 
+  // 2. Olah Foto
   var rumusImg = "";
   if (message.photo) {
     var photoId = message.photo[message.photo.length - 1].file_id;
@@ -36,55 +46,52 @@ function doPost(e) {
     rumusImg = '=IMAGE("https://drive.google.com/uc?export=view&id=' + file.getId() + '")';
   }
 
+  // 3. Pencarian Baris (Berdasarkan Lokasi Spesifik)
   var lastRow = sheet.getLastRow();
-  var targetRow = -1; // Menggunakan targetRow agar lebih jelas
-
+  var targetRow = -1;
+  
   if (lastRow > 1) {
-    var rangeData = sheet.getRange(Math.max(2, lastRow - 50), 1, Math.min(lastRow - 1, 50), 3).getValues();
-    for (var i = rangeData.length - 1; i >= 0; i--) {
-      var rowWaktu = new Date(rangeData[i][0]);
-      var rowLokasi = rangeData[i][2].toString().toUpperCase().trim();
-      var selisih = (waktu - rowWaktu) / 1000 / 60;
+    var dataRows = sheet.getRange(Math.max(2, lastRow - 50), 1, Math.min(lastRow - 1, 50), 3).getValues();
+    for (var i = dataRows.length - 1; i >= 0; i--) {
+      var rowWaktu = new Date(dataRows[i][0]);
+      var rowLokasi = dataRows[i][2].toString().toUpperCase().trim();
+      var selisihMenit = (waktu - rowWaktu) / 1000 / 60;
 
-      if ((lokasiInput !== "" && rowLokasi === lokasiInput && selisih < rentangMenit) || 
-          (isFotoLanjutan && selisih < 5)) {
+      // Jika Lokasi Sesuai Persis (meskipun banyak kata)
+      if ((lokasi !== "" && rowLokasi === lokasi && selisihMenit < 120) || (isFotoLanjutan && selisihMenit < 5)) {
         targetRow = (Math.max(2, lastRow - 50)) + i;
         break;
       }
     }
   }
 
+  // 4. Update atau Buat Baru
   if (targetRow !== -1) {
     if (isFotoLanjutan) {
       isiKolomFotoOtomatis(sheet, targetRow, rumusImg);
     } else {
-      if (command === "#tss") {
-        sheet.getRange(targetRow, 4).setValue(nilaiInput); 
+      if (cmd === "/tss") {
+        sheet.getRange(targetRow, 4).setValue(nilai); 
         isiFotoEksklusif(sheet, targetRow, 6, 7, rumusImg); 
-      } else if (command === "#tawas") {
-        sheet.getRange(targetRow, 5).setValue(nilaiInput); 
+      } else if (cmd === "/tawas") {
+        sheet.getRange(targetRow, 5).setValue(nilai); 
         isiFotoEksklusif(sheet, targetRow, 8, 9, rumusImg); 
       }
     }
   } else if (!isFotoLanjutan) {
-    var nominal = (command === "#tss") ? nilaiInput : "-";
-    var karung = (command === "#tawas") ? nilaiInput : "-";
-    var fTss = (command === "#tss") ? rumusImg : "";
-    var fTawas = (command === "#tawas") ? rumusImg : "";
-    
-    sheet.appendRow([waktu, sender, lokasiInput, nominal, karung, fTss, "", fTawas, ""]);
+    var rowData = [waktu, sender, lokasi, (cmd==="/tss"?nilai:"-"), (cmd==="/tawas"?nilai:"-"), (cmd==="/tss"?rumusImg:""), "", (cmd==="/tawas"?rumusImg:""), ""];
+    sheet.appendRow(rowData);
     formatBaris(sheet.getLastRow(), sheet);
   }
 }
 
-// Fungsi pembantu diperbaiki agar parameter 'row' konsisten
-function isiFotoEksklusif(sheet, row, col1, col2, img) {
+// Fungsi helper tetap sama seperti sebelumnya
+function isiFotoEksklusif(sheet, row, c1, c2, img) {
   if (!img) return;
-  var sel1 = sheet.getRange(row, col1);
-  if (sel1.getValue() === "" || sel1.getValue() === "-") {
-    sel1.setFormula(img);
+  if (sheet.getRange(row, c1).getValue() === "") {
+    sheet.getRange(row, c1).setFormula(img);
   } else {
-    sheet.getRange(row, col2).setFormula(img);
+    sheet.getRange(row, c2).setFormula(img);
   }
 }
 
@@ -109,10 +116,4 @@ function getTelegramFileUrl(fileId) {
   var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/getFile?file_id=" + fileId);
   var path = JSON.parse(res.getContentText()).result.file_path;
   return "https://api.telegram.org/file/bot" + token + "/" + path;
-}
-
-function setWebhook() {
-  var webAppUrl = "URL_WEB_APP_ANDA"; 
-  var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/setWebhook?url=" + webAppUrl);
-  Logger.log(res.getContentText());
 }
