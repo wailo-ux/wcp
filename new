@@ -14,7 +14,11 @@ function doPost(e) {
   var waktu = new Date();
   var rentangMenit = 60; 
 
-  // 1. Inisialisasi Header
+// Tambahkan di bagian appendRow atau update baris
+var watermarkTeks = "VERIFIED BY " + sender.toUpperCase() + " | " + lokasi + " | " + Utilities.formatDate(waktu, "GMT+7", "dd/MM/yyyy HH:mm");
+sheet.getRange(targetRow, 10).setValue(watermarkTeks).setFontStyle("italic").setFontColor("#999999");
+  
+// 1. Inisialisasi Header
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(["TIME STAMP", "SENDER", "LOKASI", "TSS (NOMINAL)", "TAWAS (KARUNG)", "FOTO TSS 1", "FOTO TSS 2", "FOTO TAWAS 1", "FOTO TAWAS 2"]);
     sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#d9ead3").setHorizontalAlignment("center");
