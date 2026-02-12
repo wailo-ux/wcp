@@ -12,48 +12,31 @@ function doPost(e) {
   var sender = message.from.first_name || message.from.id;
   var text = (message.caption || message.text || "").trim();
   var waktu = new Date();
-  var rentangMenit = 60; 
 
-// Tambahkan di bagian appendRow atau update baris
-var watermarkTeks = "VERIFIED BY " + sender.toUpperCase() + " | " + lokasi + " | " + Utilities.formatDate(waktu, "GMT+7", "dd/MM/yyyy HH:mm");
-sheet.getRange(targetRow, 10).setValue(watermarkTeks).setFontStyle("italic").setFontColor("#999999");
-  
-// 1. Inisialisasi Header
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["TIME STAMP", "SENDER", "LOKASI", "TSS (NOMINAL)", "TAWAS (KARUNG)", "FOTO TSS 1", "FOTO TSS 2", "FOTO TAWAS 1", "FOTO TAWAS 2"]);
-    sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#d9ead3").setHorizontalAlignment("center");
-  }
-
-  // 2. Logika Parsing (:)
-  var cmd = "";
-  var lokasi = "";
-  var nilai = "";
-
+  // 1. Parsing Command
+  var cmd = ""; var lokasi = ""; var nilai = "";
   if (text.toLowerCase().startsWith("/tss")) {
     cmd = "/tss";
-    var content = text.substring(4).trim(); 
-    var splitContent = content.split(":"); 
+    var content = text.substring(4).trim();
+    var splitContent = content.split(":");
     lokasi = splitContent[0] ? splitContent[0].toUpperCase().trim() : "";
     nilai = splitContent[1] ? splitContent[1].trim() : "";
   } else if (text.toLowerCase().startsWith("/tawas")) {
     cmd = "/tawas";
-    var content = text.substring(6).trim(); 
+    var content = text.substring(6).trim();
     var splitContent = content.split(":");
     lokasi = splitContent[0] ? splitContent[0].toUpperCase().trim() : "";
     nilai = splitContent[1] ? splitContent[1].trim() : "";
   }
 
   var isFotoLanjutan = (message.photo && text === "");
-  
-  // Feedback Error Format
   if (!isFotoLanjutan && cmd !== "" && lokasi === "") {
-    sendTelegramMessage(chatId, "⚠️ Format salah, Bos " + sender + "!\nGunakan format: " + cmd + " LOKASI : NOMINAL\nContoh: " + cmd + " WCP 5 : 100");
+    sendTelegramMessage(chatId, "⚠️ Format salah! Gunakan: " + cmd + " LOKASI : NOMINAL");
     return;
   }
-
   if (!isFotoLanjutan && lokasi === "" && cmd === "") return;
 
-  // 3. Simpan Foto ke Drive
+  // 2. Foto
   var rumusImg = "";
   if (message.photo) {
     var photoId = message.photo[message.photo.length - 1].file_id;
@@ -64,79 +47,66 @@ sheet.getRange(targetRow, 10).setValue(watermarkTeks).setFontStyle("italic").set
     rumusImg = '=IMAGE("https://drive.google.com/uc?export=view&id=' + file.getId() + '")';
   }
 
-  // 4. Cari Baris (Sesi 60 Menit)
+  // 3. Cari Baris
   var lastRow = sheet.getLastRow();
   var targetRow = -1;
   if (lastRow > 1) {
     var rangeData = sheet.getRange(Math.max(2, lastRow - 50), 1, Math.min(lastRow - 1, 50), 3).getValues();
     for (var i = rangeData.length - 1; i >= 0; i--) {
-      var rowWaktu = new Date(rangeData[i][0]);
       var rowLokasi = rangeData[i][2].toString().toUpperCase().trim();
-      var selisih = (waktu - rowWaktu) / 1000 / 60;
-      if ((lokasi !== "" && rowLokasi === lokasi && selisih < rentangMenit) || (isFotoLanjutan && selisih < 5)) {
+      var selisih = (waktu - new Date(rangeData[i][0])) / 1000 / 60;
+      if ((lokasi !== "" && rowLokasi === lokasi && selisih < 60) || (isFotoLanjutan && selisih < 5)) {
         targetRow = (Math.max(2, lastRow - 50)) + i;
         break;
       }
     }
   }
 
-  // 5. Eksekusi & Alert
+  // 4. Eksekusi
   if (targetRow !== -1) {
     if (isFotoLanjutan) {
       isiKolomFotoOtomatis(sheet, targetRow, rumusImg);
-      sendTelegramMessage(chatId, "📸 Foto tambahan tertempel di " + sheet.getRange(targetRow, 3).getValue());
+      sendTelegramMessage(chatId, "📸 Foto tambahan masuk ke " + sheet.getRange(targetRow, 3).getValue());
     } else {
       if (cmd === "/tss") {
-        sheet.getRange(targetRow, 4).setValue(nilai); 
-        isiFotoEksklusif(sheet, targetRow, 6, 7, rumusImg); 
-        // CEK ALERT TSS > 200
+        sheet.getRange(targetRow, 4).setValue(nilai);
+        isiFotoEksklusif(sheet, targetRow, 6, 7, rumusImg);
         if (!isNaN(nilai) && parseInt(nilai) > 200) {
-          sendTelegramMessage(chatId, "🚨 ALERT!!! TSS di " + lokasi + " mencapai " + nilai + " (MELEBIHI BATAS 200!). Segera cek treatment!");
+          sendTelegramMessage(chatId, "🚨 ALERT!!! TSS " + lokasi + " : " + nilai + " (OVER 200!)");
         } else {
-          sendTelegramMessage(chatId, "✅ TSS " + lokasi + " berhasil update: " + nilai);
+          sendTelegramMessage(chatId, "✅ TSS " + lokasi + " Updated!");
         }
       } else if (cmd === "/tawas") {
-        sheet.getRange(targetRow, 5).setValue(nilai); 
-        isiFotoEksklusif(sheet, targetRow, 8, 9, rumusImg); 
-        sendTelegramMessage(chatId, "✅ TAWAS " + lokasi + " berhasil update: " + nilai + " karung");
+        sheet.getRange(targetRow, 5).setValue(nilai);
+        isiFotoEksklusif(sheet, targetRow, 8, 9, rumusImg);
+        sendTelegramMessage(chatId, "✅ TAWAS " + lokasi + " Updated!");
       }
     }
   } else if (!isFotoLanjutan) {
-    var nominal = (cmd==="/tss"?nilai:"-");
-    var karung = (cmd==="/tawas"?nilai:"-");
-    var fTss = (cmd==="/tss"?rumusImg:"");
-    var fTawas = (cmd==="/tawas"?rumusImg:"");
-    sheet.appendRow([waktu, sender, lokasi, nominal, karung, fTss, "", fTawas, ""]);
+    sheet.appendRow([waktu, sender, lokasi, (cmd==="/tss"?nilai:"-"), (cmd==="/tawas"?nilai:"-"), (cmd==="/tss"?rumusImg:""), "", (cmd==="/tawas"?rumusImg:""), ""]);
     formatBaris(sheet.getLastRow(), sheet);
-    
-    // Alert untuk Baris Baru
-    if (cmd === "/tss" && !isNaN(nilai) && parseInt(nilai) > 200) {
-      sendTelegramMessage(chatId, "🚨 ALERT BARU!!! TSS " + lokasi + ": " + nilai + " (OVER 200!)");
-    } else {
-      sendTelegramMessage(chatId, "🆕 Baris baru dibuat untuk: " + lokasi);
-    }
+    sendTelegramMessage(chatId, "🆕 Baris baru: " + lokasi);
   }
 }
 
-// --- FUNGSI HELPER (JANGAN DIUBAH) ---
 function sendTelegramMessage(chatId, text) {
-  var url = "https://api.telegram.org/bot" + token + "/sendMessage";
-  var options = { "method": "post", "contentType": "application/json", "payload": JSON.stringify({"chat_id": chatId, "text": text}) };
-  UrlFetchApp.fetch(url, options);
+  UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
+    "method": "post", "contentType": "application/json", "payload": JSON.stringify({"chat_id": chatId, "text": text})
+  });
 }
 
 function isiFotoEksklusif(sheet, row, c1, c2, img) {
   if (!img) return;
-  var val1 = sheet.getRange(row, c1).getValue();
-  if (val1 === "" || val1 === "-") { sheet.getRange(row, c1).setFormula(img); } 
-  else { sheet.getRange(row, c2).setFormula(img); }
+  var v1 = sheet.getRange(row, c1).getValue();
+  if (v1 === "" || v1 === "-") { sheet.getRange(row, c1).setFormula(img); } else { sheet.getRange(row, c2).setFormula(img); }
 }
 
 function isiKolomFotoOtomatis(sheet, row, img) {
   if (!img) return;
   for (var col = 6; col <= 9; col++) {
-    var val = sheet.getRange(row, col).getValue();
-    if (val === "" || val === "-") { sheet.getRange(row, col).setFormula(img); break; }
+    if (sheet.getRange(row, col).getValue() === "" || sheet.getRange(row, col).getValue() === "-") {
+      sheet.getRange(row, col).setFormula(img); break;
+    }
   }
 }
 
@@ -147,17 +117,11 @@ function formatBaris(row, sheet) {
 }
 
 function getTelegramFileUrl(fileId) {
-  var res = UrlFetchApp.fetch("https://api.telegram.org/file/bot" + token + "/" + JSON.parse(UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/getFile?file_id=" + fileId).getContentText()).result.file_path);
-  return res.getUrl(); // URL langsung dari fetch
-}
-
-function getTelegramFileUrl(fileId) {
-  var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/getFile?file_id=" + fileId);
-  var path = JSON.parse(res.getContentText()).result.file_path;
+  var path = JSON.parse(UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/getFile?file_id=" + fileId)).result.file_path;
   return "https://api.telegram.org/file/bot" + token + "/" + path;
 }
 
 function setWebhook() {
-  var webAppUrl = "URL_WEB_APP_ANDA"; 
+  var webAppUrl = "URL_WEB_APP_BARU_ANDA";
   UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/setWebhook?url=" + webAppUrl);
 }
