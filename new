@@ -1,48 +1,108 @@
 var token = "8075574862:AAGz41b0GS-mtwXr_O4ENXqS8WLp9TOru34";
 var folderId = "ID_FOLDER_DRIVE_ANDA";
 
+var token = "ISI_TOKEN_TELEGRAM_ANDA";
+var folderId = "ID_FOLDER_DRIVE_ANDA";
+
 function doPost(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getActiveSheet();
   var data = JSON.parse(e.postData.contents);
-  if (!data.message) return;
+  if (!data || !data.message) return;
 
   var message = data.message;
   var sender = message.from.first_name || message.from.id;
   var text = (message.caption || message.text || "").trim();
   var waktu = new Date();
-  var rentangMenit = 60; // Toleransi 1 jam
 
-  // 1. Inisialisasi Header jika Sheet kosong
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["TIME STAMP", "SENDER", "LOKASI", "TSS (NOMINAL)", "TAWAS (KARUNG)", "FOTO TSS 1", "FOTO TSS 2", "FOTO TAWAS 1", "FOTO TAWAS 2"]);
-    sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#d9ead3").setHorizontalAlignment("center");
-  }
+  // 1. Parsing Command & Lokasi
+  // Menggunakan regex \s+ untuk menangani spasi ganda agar angka tidak terpotong
+  var parts = text.split(/\s+/);
+  var cmd = parts[0] ? parts[0].toLowerCase() : "";
+  var lokasi = parts[1] ? parts[1].toUpperCase() : "";
+  var nilai = parts[2] || ""; // Menangkap nominal seperti 500
 
-  // 2. Pecah Command dan Lokasi
-  // Menggunakan regex agar spasi ganda tidak jadi masalah
-  var parts = text.split(/\s+/); 
-  var command = parts[0] ? parts[0].toLowerCase() : "";
-  var lokasiInput = parts[1] ? parts[1].toUpperCase().trim() : "";
-  var nilaiInput = parts[2] || "-";
+  // LOGIKA PENTING: Jika foto kedua dari album datang tanpa teks,
+  // kita izinkan lanjut agar bisa menempel ke baris sebelumnya.
+  var isFotoLanjutan = (message.photo && text === "");
+  if (!isFotoLanjutan && lokasi === "") return;
 
-  // Jika tidak ada lokasi, hentikan proses agar tidak berantakan
-  if (lokasiInput === "") return;
-
-  // 3. Olah Foto
-  var fileId = "";
+  // 2. Simpan Foto ke Drive
+  var rumusImg = "";
   if (message.photo) {
     var photoId = message.photo[message.photo.length - 1].file_id;
     var fileUrl = getTelegramFileUrl(photoId);
     var blob = UrlFetchApp.fetch(fileUrl).getBlob();
     var file = DriveApp.getFolderById(folderId).createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    fileId = file.getId();
+    rumusImg = '=IMAGE("https://drive.google.com/uc?export=view&id=' + file.getId() + '")';
   }
-  var rumusImg = fileId ? '=IMAGE("https://drive.google.com/uc?export=view&id=' + fileId + '")' : "";
 
+  // 3. Cari Baris Terakhir (Berdasarkan Sesi/Waktu)
   var lastRow = sheet.getLastRow();
   var rowToUpdate = -1;
+  
+  if (lastRow > 1) {
+    var rangeLook = (lastRow > 50) ? 50 : lastRow - 1;
+    var dataRows = sheet.getRange(lastRow - rangeLook + 1, 1, rangeLook, 3).getValues();
+    
+    for (var i = dataRows.length - 1; i >= 0; i--) {
+      var rowWaktu = new Date(dataRows[i][0]);
+      var rowSender = dataRows[i][1];
+      var selisihMenit = (waktu - rowWaktu) / 1000 / 60;
+
+      // Jika pengirim sama dan masih dalam rentang 30 menit
+      if (rowSender === sender && selisihMenit < 30) {
+        rowToUpdate = (lastRow - rangeLook + 1) + i;
+        break;
+      }
+    }
+  }
+
+  // 4. Eksekusi Update atau Baris Baru
+  if (rowToUpdate !== -1) {
+    // Jika foto tanpa teks, tempel ke kolom foto yang kosong di baris ini
+    if (isFotoLanjutan) {
+      isiKolomFotoOtomatis(sheet, rowToUpdate, rumusImg);
+    } else {
+      // Jika ada teks, update nilai nominal dan fotonya
+      if (cmd === "#tss") {
+        sheet.getRange(rowToUpdate, 3).setValue(lokasi);
+        if (nilai !== "") sheet.getRange(rowToUpdate, 4).setValue(nilai);
+        isiKolomFotoSpesifik(sheet, rowToUpdate, 6, 7, rumusImg);
+      } else if (cmd === "#tawas") {
+        sheet.getRange(rowToUpdate, 5).setValue(nilai);
+        isiKolomFotoSpesifik(sheet, rowToUpdate, 8, 9, rumusImg);
+      }
+    }
+  } else if (!isFotoLanjutan) {
+    // Buat Baris Baru (Hanya jika ada command)
+    var rowData = [waktu, sender, lokasi, (cmd==="#tss"?nilai:"-"), (cmd==="#tawas"?nilai:"-"), (cmd==="#tss"?rumusImg:""), "", (cmd==="#tawas"?rumusImg:""), ""];
+    sheet.appendRow(rowData);
+    formatBaris(sheet.getLastRow(), sheet);
+  }
+}
+
+// Fungsi mengisi foto ke kolom kosong (Foto 1 atau Foto 2)
+function isiKolomFotoSpesifik(sheet, row, c1, c2, img) {
+  if (!img) return;
+  if (sheet.getRange(row, c1).getValue() === "") {
+    sheet.getRange(row, c1).setFormula(img);
+  } else {
+    sheet.getRange(row, c2).setFormula(img);
+  }
+}
+
+// Fungsi cerdas untuk menempelkan foto album tanpa teks
+function isiKolomFotoOtomatis(sheet, row, img) {
+  if (!img) return;
+  for (var col = 6; col <= 9; col++) {
+    if (sheet.getRange(row, col).getValue() === "") {
+      sheet.getRange(row, col).setFormula(img);
+      break;
+    }
+  }
+}
 
   // 4. LOGIKA PENCARIAN BARIS (Mencari Lokasi yang sama dalam 60 menit terakhir)
   if (lastRow > 1) {
