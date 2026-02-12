@@ -11,20 +11,18 @@ function doPost(e) {
   var sender = message.from.first_name || message.from.id;
   var text = message.caption || message.text || "";
   var waktu = new Date();
-  var rentangMenit = 5; // Toleransi penggabungan foto tambahan
+  var rentangMenit = 5; 
 
   // 1. Setup Header
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["TIME STAMP", "SENDER", "LOKASI", "TSS (NOMINAL)", "TAWAS (KARUNG)", "FOTO TSS", "FOTO PENAWASAN"]);
-    sheet.getRange("A1:G1").setFontWeight("bold").setBackground("#d9ead3").setHorizontalAlignment("center");
-    sheet.setColumnWidth(6, 300); 
-    sheet.setColumnWidth(7, 300);
+    sheet.appendRow(["TIME STAMP", "SENDER", "LOKASI", "TSS (NOMINAL)", "TAWAS (KARUNG)", "FOTO 1", "FOTO 2", "FOTO 3", "FOTO 4"]);
+    sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#d9ead3").setHorizontalAlignment("center");
   }
 
   var lowerText = text.toLowerCase();
   var fileId = "";
 
-  // 2. Proses Simpan Foto ke Drive
+  // 2. Simpan Foto ke Drive
   if (message.photo) {
     var photoId = message.photo[message.photo.length - 1].file_id;
     var fileUrl = getTelegramFileUrl(photoId);
@@ -38,61 +36,62 @@ function doPost(e) {
   var isTss = lowerText.startsWith("#tss");
   var isTawas = lowerText.startsWith("#tawas");
 
-  // Logika Cek Baris Terakhir untuk Penggabungan Foto (Multi-foto)
+  // LOGIKA: CEK APAKAH HARUS UPDATE KE KANAN
   if (lastRow > 1) {
     var lastWaktu = new Date(sheet.getRange(lastRow, 1).getValue());
     var lastSender = sheet.getRange(lastRow, 2).getValue();
     var selisih = (waktu - lastWaktu) / 1000 / 60;
 
+    // Jika pengirim sama dan masih dalam rentang waktu yang sama
     if (lastSender == sender && selisih < rentangMenit) {
-      // Jika kirim foto TSS tambahan (tanpa text baru atau hashtag sama)
-      if (isTss || (message.photo && text == "")) {
-         updateFotoSel(sheet, lastRow, 6, fileId);
-         return;
+      
+      // Ambil rumus IMAGE
+      var rumusImg = '=IMAGE("https://drive.google.com/uc?export=view&id=' + fileId + '")';
+
+      // Cari kolom kosong pertama mulai dari kolom 6 (FOTO 1) ke kanan
+      var barisData = sheet.getRange(lastRow, 1, 1, 20).getValues()[0]; // Ambil 20 kolom
+      var kolomKosong = 6;
+      for (var i = 5; i < barisData.length; i++) {
+        if (barisData[i] == "" || barisData[i] == "-") {
+          kolomKosong = i + 1;
+          break;
+        }
       }
-      // Jika kirim foto TAWAS tambahan
+
+      // Update nominal TSS atau TAWAS jika ada teks baru
+      if (isTss) {
+        var nominal = text.split(" ")[2] || "-";
+        sheet.getRange(lastRow, 4).setValue(nominal);
+      }
       if (isTawas) {
-         var jml = text.replace(/#tawas/i, "").trim() || "1";
-         sheet.getRange(lastRow, 5).setValue(jml);
-         updateFotoSel(sheet, lastRow, 7, fileId);
-         return;
+        var jml = text.replace(/#tawas/i, "").trim() || "1";
+        sheet.getRange(lastRow, 5).setValue(jml);
       }
+
+      // Taruh foto di kolom kosong sebelah kanan
+      if (fileId) {
+        sheet.getRange(lastRow, kolomKosong).setFormula(rumusImg);
+        sheet.setColumnWidth(kolomKosong, 300);
+      }
+      return;
     }
   }
 
-  // 3. Jika bukan penggabungan, buat baris baru (Untuk #TSS pertama)
+  // 3. Jika Sesi Baru (#TSS pertama)
   if (isTss) {
     var parts = text.split(" ");
     var lokasi = parts[1] || "WTP";
     var nominal = parts[2] || "-";
     var rumusImg = fileId ? '=IMAGE("https://drive.google.com/uc?export=view&id=' + fileId + '")' : "-";
     
-    sheet.appendRow([waktu, sender, lokasi, nominal, "-", rumusImg, "-"]);
-    formatBaru(sheet.getLastRow(), sheet);
+    sheet.appendRow([waktu, sender, lokasi, nominal, "-", rumusImg]);
+    
+    var row = sheet.getLastRow();
+    sheet.setRowHeight(row, 300);
+    sheet.setColumnWidth(6, 300);
+    sheet.getRange(row, 1, 1, 9).setBorder(true, true, true, true, true, true)
+         .setVerticalAlignment("middle").setHorizontalAlignment("center");
   }
-}
-
-// Fungsi untuk menggabungkan banyak foto dalam satu sel
-function updateFotoSel(sheet, row, col, newFileId) {
-  if (!newFileId) return;
-  var valLama = sheet.getRange(row, col).getFormula();
-  var newImg = 'IMAGE("https://drive.google.com/uc?export=view&id=' + newFileId + '")';
-  
-  if (valLama == "" || valLama == "-") {
-    sheet.getRange(row, col).setFormula("=" + newImg);
-  } else {
-    // Menggunakan teknik baris baru di dalam sel agar foto tersusun vertikal
-    // Catatan: Google Sheets terbatas dalam menampilkan banyak IMAGE dalam satu sel, 
-    // namun cara ini paling optimal untuk grouping.
-    var cleanFormula = valLama.replace("=", "");
-    sheet.getRange(row, col).setFormula("=" + cleanFormula + "& CHAR(10) &" + newImg);
-  }
-}
-
-function formatBaru(row, sheet) {
-  sheet.setRowHeight(row, 300);
-  sheet.getRange(row, 1, 1, 7).setBorder(true, true, true, true, true, true)
-       .setVerticalAlignment("middle").setHorizontalAlignment("center").setWrap(true);
 }
 
 function getTelegramFileUrl(fileId) {
