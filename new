@@ -1,4 +1,4 @@
-var token = "ISI_TOKEN_TELEGRAM_ANDA";
+var token = "8075574862:AAGz41b0GS-mtwXr_O4ENXqS8WLp9TOru34";
 var folderId = "ID_FOLDER_DRIVE_ANDA";
 
 function doPost(e) {
