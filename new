@@ -9,20 +9,28 @@ function doPost(e) {
 
   var message = data.message;
   var sender = message.from.first_name || message.from.id;
-  var text = message.caption || message.text || "";
+  var text = (message.caption || message.text || "").trim();
   var waktu = new Date();
-  var rentangMenit = 30; // Rentang waktu toleransi satu sesi laporan (30 menit)
+  var rentangMenit = 60; // Toleransi 1 jam
 
-  // 1. Setup Header jika masih kosong
+  // 1. Inisialisasi Header jika Sheet kosong
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(["TIME STAMP", "SENDER", "LOKASI", "TSS (NOMINAL)", "TAWAS (KARUNG)", "FOTO TSS 1", "FOTO TSS 2", "FOTO TAWAS 1", "FOTO TAWAS 2"]);
     sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#d9ead3").setHorizontalAlignment("center");
   }
 
-  var lowerText = text.toLowerCase();
-  var fileId = "";
+  // 2. Pecah Command dan Lokasi
+  // Menggunakan regex agar spasi ganda tidak jadi masalah
+  var parts = text.split(/\s+/); 
+  var command = parts[0] ? parts[0].toLowerCase() : "";
+  var lokasiInput = parts[1] ? parts[1].toUpperCase().trim() : "";
+  var nilaiInput = parts[2] || "-";
 
-  // 2. Proses Simpan Foto ke Drive
+  // Jika tidak ada lokasi, hentikan proses agar tidak berantakan
+  if (lokasiInput === "") return;
+
+  // 3. Olah Foto
+  var fileId = "";
   if (message.photo) {
     var photoId = message.photo[message.photo.length - 1].file_id;
     var fileUrl = getTelegramFileUrl(photoId);
@@ -31,78 +39,81 @@ function doPost(e) {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     fileId = file.getId();
   }
-
-  // Ekstrak Informasi dari Teks
-  var isTss = lowerText.startsWith("#tss");
-  var isTawas = lowerText.startsWith("#tawas");
-  var parts = text.split(" ");
-  var lokasiInput = parts[1] ? parts[1].toUpperCase() : ""; // Mengambil lokasi dari teks
+  var rumusImg = fileId ? '=IMAGE("https://drive.google.com/uc?export=view&id=' + fileId + '")' : "";
 
   var lastRow = sheet.getLastRow();
   var rowToUpdate = -1;
 
-  // 3. LOGIKA PENCARIAN BARIS (Berdasarkan Lokasi & Waktu)
-  if (lastRow > 1 && lokasiInput !== "") {
-    var dataSheet = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
-    for (var i = dataSheet.length - 1; i >= 0; i--) {
-      var rowWaktu = new Date(dataSheet[i][0]);
-      var rowSender = dataSheet[i][1];
-      var rowLokasi = dataSheet[i][2];
+  // 4. LOGIKA PENCARIAN BARIS (Mencari Lokasi yang sama dalam 60 menit terakhir)
+  if (lastRow > 1) {
+    // Ambil data Lokasi (Kolom C) dan TimeStamp (Kolom A)
+    var rangeData = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    
+    // Cari dari baris paling bawah ke atas
+    for (var i = rangeData.length - 1; i >= 0; i--) {
+      var rowWaktu = new Date(rangeData[i][0]);
+      var rowLokasi = rangeData[i][2].toString().toUpperCase().trim();
       var selisih = (waktu - rowWaktu) / 1000 / 60;
 
-      // Jika Lokasi sama, Pengirim sama, dan masih dalam rentang waktu laporan
-      if (rowLokasi == lokasiInput && rowSender == sender && selisih < rentangMenit) {
-        rowToUpdate = i + 2; // Index baris di sheet
+      // Jika Lokasi SAMA dan Waktu MASIH MASUK RENTANG
+      if (rowLokasi === lokasiInput && selisih < rentangMenit) {
+        rowToUpdate = i + 2; // +2 karena array mulai dari 0 dan header di baris 1
         break;
       }
     }
   }
 
-  var rumusImg = fileId ? '=IMAGE("https://drive.google.com/uc?export=view&id=' + fileId + '")' : "";
-
-  // 4. EKSEKUSI UPDATE ATAU BARU
-  if (rowToUpdate != -1) {
-    // UPDATE BARIS YANG SUDAH ADA
-    if (isTss) {
-      sheet.getRange(rowToUpdate, 4).setValue(parts[2] || "-"); // Update Nominal TSS
-      updateFotoKanan(sheet, rowToUpdate, 6, 7, rumusImg); // Masuk ke kolom Foto TSS 1 atau 2
-    } else if (isTawas) {
-      sheet.getRange(rowToUpdate, 5).setValue(parts[2] || "1"); // Update Karung Tawas
-      updateFotoKanan(sheet, rowToUpdate, 8, 9, rumusImg); // Masuk ke kolom Foto Tawas 1 atau 2
+  // 5. Eksekusi: Update baris lama atau buat baris baru
+  if (rowToUpdate !== -1) {
+    // UPDATE KE KANAN
+    if (command === "#tss") {
+      sheet.getRange(rowToUpdate, 4).setValue(nilaiInput);
+      isiFotoKeKolom(sheet, rowToUpdate, 6, 7, rumusImg);
+    } else if (command === "#tawas") {
+      sheet.getRange(rowToUpdate, 5).setValue(nilaiInput);
+      isiFotoKeKolom(sheet, rowToUpdate, 8, 9, rumusImg);
     }
-  } else if (isTss || isTawas) {
-    // BUAT BARIS BARU (Jika lokasi baru atau sudah beda waktu)
-    var nominal = isTss ? (parts[2] || "-") : "-";
-    var karung = isTawas ? (parts[2] || "-") : "-";
-    var fotoTss = isTss ? rumusImg : "-";
-    var fotoTawas = isTawas ? rumusImg : "-";
-
-    sheet.appendRow([waktu, sender, lokasiInput, nominal, karung, fotoTss, "", fotoTawas, ""]);
-    formatBaris(sheet.getLastRow(), sheet);
-  }
-}
-
-// Fungsi bantu untuk menaruh foto di kolom kosong sebelah kanan
-function updateFotoKanan(sheet, row, col1, col2, rumusImg) {
-  if (rumusImg == "") return;
-  var val1 = sheet.getRange(row, col1).getValue();
-  if (val1 == "" || val1 == "-") {
-    sheet.getRange(row, col1).setFormula(rumusImg);
   } else {
-    sheet.getRange(row, col2).setFormula(rumusImg);
+    // BUAT BARIS BARU
+    var nominal = (command === "#tss") ? nilaiInput : "-";
+    var karung = (command === "#tawas") ? nilaiInput : "-";
+    var fTss = (command === "#tss") ? rumusImg : "";
+    var fTawas = (command === "#tawas") ? rumusImg : "";
+    
+    sheet.appendRow([waktu, sender, lokasiInput, nominal, karung, fTss, "", fTawas, ""]);
+    
+    // Atur format baris baru
+    var currentRow = sheet.getLastRow();
+    sheet.setRowHeight(currentRow, 300);
+    sheet.getRange(currentRow, 1, 1, 9).setBorder(true, true, true, true, true, true)
+         .setVerticalAlignment("middle").setHorizontalAlignment("center");
+    sheet.setColumnWidth(6, 300);
+    sheet.setColumnWidth(7, 300);
+    sheet.setColumnWidth(8, 300);
+    sheet.setColumnWidth(9, 300);
   }
-  sheet.setColumnWidth(col1, 300);
-  sheet.setColumnWidth(col2, 300);
 }
 
-function formatBaris(row, sheet) {
-  sheet.setRowHeight(row, 300);
-  sheet.getRange(row, 1, 1, 9).setBorder(true, true, true, true, true, true)
-       .setVerticalAlignment("middle").setHorizontalAlignment("center").setWrap(true);
+// Fungsi pembantu untuk mengisi kolom foto yang kosong
+function isiFotoKeKolom(sheet, row, col1, col2, rumusImg) {
+  if (!rumusImg) return;
+  var sel1 = sheet.getRange(row, col1);
+  var sel2 = sheet.getRange(row, col2);
+  
+  if (sel1.getValue() === "" || sel1.getValue() === "-") {
+    sel1.setFormula(rumusImg);
+  } else {
+    sel2.setFormula(rumusImg);
+  }
 }
 
 function getTelegramFileUrl(fileId) {
   var response = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/getFile?file_id=" + fileId);
   var filePath = JSON.parse(response.getContentText()).result.file_path;
   return "https://api.telegram.org/file/bot" + token + "/" + filePath;
+}
+
+function setWebhook() {
+  var webAppUrl = "URL_WEB_APP_ANDA"; 
+  UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/setWebhook?url=" + webAppUrl);
 }
