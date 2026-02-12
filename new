@@ -117,3 +117,9 @@ function getTelegramFileUrl(fileId) {
   var path = JSON.parse(res.getContentText()).result.file_path;
   return "https://api.telegram.org/file/bot" + token + "/" + path;
 }
+
+function setWebhook() {
+  var webAppUrl = "URL_WEB_APP_ANDA"; 
+  var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/setWebhook?url=" + webAppUrl);
+  Logger.log(res.getContentText());
+}
