@@ -20,14 +20,14 @@ function doPost(e) {
                 "2️⃣ *Laporan TAWAS*:\n" +
                 "`/tawas LOKASI : JUMLAH` \n" +
                 "Contoh: `/tawas BUHUT JAYA : 8000` \n\n" +
-                "💡 *Tips*:\n" +
-                "• Gunakan tanda titik dua `:` sebagai pemisah.\n" +
-                "• Kirim foto bersamaan dengan caption di atas.\n" +
-                "• Gunakan nama lokasi yang konsisten agar rapi.\n" +
-                "• Alert aktif jika TSS > 200.";
+                "⚠️ *ATURAN PENTING FOTO ALBUM*:\n" +
+                "• Anda bisa kirim **2 FOTO SEKALIGUS** dalam 1 pesan.\n" +
+                "• *SYARAT*: 2 foto tersebut harus **KATEGORI YANG SAMA** (Misal: 2 foto TSS saja).\n" +
+                "• Jika ingin lapor TSS & Tawas, kirim secara **BERGANTIAN** (Selesaikan TSS dulu, baru Tawas).\n" +
+                "• Selalu gunakan tanda titik dua `:` sebagai pemisah.";
     
     sendTelegramMessage(chatId, guide);
-    return; 
+    return;
   }
   var waktu = new Date();
 
