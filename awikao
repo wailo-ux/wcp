@@ -11,6 +11,24 @@ function doPost(e) {
   var chatId = message.chat.id;
   var sender = message.from.first_name || message.from.id;
   var text = (message.caption || message.text || "").trim();
+
+  if (text.toLowerCase().startsWith("/help") || text.toLowerCase().startsWith("/start")) {
+    var guide = "📘 *PANDUAN LAPORAN WTP - TOP*\n\n" +
+                "1️⃣ *Laporan TSS*:\n" +
+                "`/tss LOKASI : NOMINAL` \n" +
+                "Contoh: `/tss BUHUT JAYA : 500` \n\n" +
+                "2️⃣ *Laporan TAWAS*:\n" +
+                "`/tawas LOKASI : JUMLAH` \n" +
+                "Contoh: `/tawas BUHUT JAYA : 8000` \n\n" +
+                "💡 *Tips*:\n" +
+                "• Gunakan tanda titik dua `:` sebagai pemisah.\n" +
+                "• Kirim foto bersamaan dengan caption di atas.\n" +
+                "• Gunakan nama lokasi yang konsisten agar rapi.\n" +
+                "• Alert aktif jika TSS > 200.";
+    
+    sendTelegramMessage(chatId, guide);
+    return; 
+  }
   var waktu = new Date();
 
   // 1. AUTO HEADER & FREEZE HEADER (HEADER MATI SAAT SCROLL)
